@@ -11,7 +11,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 
 # ============================================================
-# CONFIGURATIE (uit GitHub Secrets)
+# CONFIGURATIE
 # ============================================================
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -162,59 +162,62 @@ class SignalEngine:
 
         if gap_pct < -0.003:
             score += 18
-            reasons.append(f"📉 CME gap DOWN {gap_pct:.2%} → LONG")
+            reasons.append(f"CME gap DOWN {gap_pct:.2%} -> LONG")
         elif gap_pct > 0.003:
             score -= 18
-            reasons.append(f"📈 CME gap UP {gap_pct:.2%} → SHORT")
+            reasons.append(f"CME gap UP {gap_pct:.2%} -> SHORT")
 
         if pre['position'] > 0.7:
             score += 12
-            reasons.append("🟢 Pre-market closing near HIGH")
+            reasons.append("Pre-market closing near HIGH")
         elif pre['position'] < 0.3:
             score -= 12
-            reasons.append("🔴 Pre-market closing near LOW")
+            reasons.append("Pre-market closing near LOW")
 
         if vix and vix > 30:
             score += 14
-            reasons.append(f"😰 VIX FEAR {vix:.1f}")
+            reasons.append(f"VIX FEAR {vix:.1f}")
         elif vix and vix < 12:
             score -= 14
-            reasons.append(f"😎 VIX complacency {vix:.1f}")
+            reasons.append(f"VIX complacency {vix:.1f}")
 
         if fear < 20:
             score += 10
-            reasons.append(f"💀 Extreme FEAR {fear}/100")
+            reasons.append(f"Extreme FEAR {fear}/100")
         elif fear > 75:
             score -= 10
-            reasons.append(f"🚀 Extreme GREED {fear}/100")
+            reasons.append(f"Extreme GREED {fear}/100")
 
         if funding > 0.01:
             score += 8
-            reasons.append(f"💸 Positive funding {funding:.3%}")
+            reasons.append(f"Positive funding {funding:.3%}")
         elif funding < -0.01:
             score -= 8
-            reasons.append(f"💸 Negative funding {funding:.3%}")
+            reasons.append(f"Negative funding {funding:.3%}")
 
         if today.weekday() == 0:
             score += 5
-            reasons.append("📅 Monday CME gap fill bias")
+            reasons.append("Monday CME gap fill bias")
 
         score = max(0, min(100, score))
 
         if score >= 75:
-            direction = "🟢 LONG"
+            direction = "LONG"
+            emoji = "🚀"
         elif score <= 25:
-            direction = "🔴 SHORT"
+            direction = "SHORT"
+            emoji = "📉"
         else:
-            direction = "⚪ NO TRADE"
+            direction = "NO TRADE"
+            emoji = "🚫"
 
         atr = self._atr()
         entry = pre['close']
 
-        if direction.startswith("🟢"):
+        if direction == "LONG":
             sl = entry - 2 * atr
             tp = entry + 3 * atr
-        elif direction.startswith("🔴"):
+        elif direction == "SHORT":
             sl = entry + 2 * atr
             tp = entry - 3 * atr
         else:
@@ -224,6 +227,7 @@ class SignalEngine:
             'date': today.strftime('%Y-%m-%d'),
             'time': datetime.now(timezone.utc).strftime('%H:%M UTC'),
             'direction': direction,
+            'emoji': emoji,
             'score': score,
             'entry': entry,
             'stop_loss': sl,
@@ -246,44 +250,57 @@ class SignalEngine:
         return sum(trs[-period:]) / period
 
 # ============================================================
-# ALERTS
+# ALERTS - PLAIN TEXT (geen Markdown, geen formatting issues)
 # ============================================================
 
 def send_alert(signal):
-    if signal['direction'].startswith("⚪"):
-        msg = f"🚫 *BTC NY OPEN - NO TRADE*\n\n"
-        msg += f"📅 {signal['date']} {signal['time']}\n"
-        msg += f"📊 Score: {signal['score']}/100 (too weak)\n"
-        msg += f"💰 BTC Price: ${signal['entry']:,.2f}\n\n"
-        msg += f"*Market conditions:*\n"
-        msg += f"• VIX: {signal['vix']}\n"
-        msg += f"• Fear Index: {signal['fear']}/100\n"
-        msg += f"• Funding: {signal['funding']:.4%}\n\n"
-        msg += f"🛡️ Stay flat today."
+    if signal['direction'] == "NO TRADE":
+        msg = f"BTC NY OPEN - NO TRADE\n\n"
+        msg += f"Date: {signal['date']} {signal['time']}\n"
+        msg += f"Score: {signal['score']}/100 (too weak)\n"
+        msg += f"BTC Price: ${signal['entry']:,.2f}\n\n"
+        msg += f"Market conditions:\n"
+        msg += f"- VIX: {signal['vix']}\n"
+        msg += f"- Fear Index: {signal['fear']}/100\n"
+        msg += f"- Funding: {signal['funding']:.4%}\n\n"
+        msg += f"Stay flat today."
     else:
-        msg = f"{signal['direction'].split()[0]} *BTC NY OPEN SIGNAL*\n\n"
-        msg += f"📅 {signal['date']} {signal['time']}\n"
-        msg += f"🎯 *{signal['direction'].split(maxsplit=1)[1]}*\n"
-        msg += f"📊 Confidence: {signal['score']}/100\n\n"
-        msg += f"💰 *Entry:* ${signal['entry']:,.2f}\n"
-        msg += f"🛑 *Stop Loss:* ${signal['stop_loss']:,.2f}\n"
-        msg += f"🎯 *Take Profit:* ${signal['take_profit']:,.2f}\n"
-        msg += f"📏 ATR: ${signal['atr']:,.2f}\n\n"
-        msg += f"*Why this signal:*\n"
+        msg = f"{signal['emoji']} BTC NY OPEN SIGNAL\n\n"
+        msg += f"Date: {signal['date']} {signal['time']}\n"
+        msg += f"Direction: {signal['direction']}\n"
+        msg += f"Confidence: {signal['score']}/100\n\n"
+        msg += f"Entry: ${signal['entry']:,.2f}\n"
+        msg += f"Stop Loss: ${signal['stop_loss']:,.2f}\n"
+        msg += f"Take Profit: ${signal['take_profit']:,.2f}\n"
+        msg += f"ATR: ${signal['atr']:,.2f}\n\n"
+        msg += f"Why this signal:\n"
         for r in signal['reasons']:
-            msg += f"{r}\n"
-        msg += f"\n⚠️ *This is a signal only. You decide if you trade.*"
+            msg += f"- {r}\n"
+        msg += f"\nThis is a signal only. You decide if you trade."
 
+    # Telegram - eerst plain text proberen
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            r = requests.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': msg, 'parse_mode': 'MarkdownV2'}, timeout=10)
-            logger.info(f"Telegram sent: {r.status_code}")
+            payload = {
+                'chat_id': TELEGRAM_CHAT_ID,
+                'text': msg,
+                'parse_mode': None  # GEEN Markdown - plain text
+            }
+            r = requests.post(url, json=payload, timeout=10)
+            logger.info(f"Telegram response: {r.status_code} - {r.text}")
+            if r.status_code == 200:
+                logger.info("Telegram alert SENT successfully")
+            else:
+                logger.error(f"Telegram FAILED: {r.text}")
         except Exception as e:
-            logger.warning(f"Telegram failed: {e}")
+            logger.error(f"Telegram exception: {e}")
+    else:
+        logger.warning("No Telegram credentials configured")
 
+    # Console output
     print("\n" + "="*50)
-    print(msg.replace('\n', '\n'))
+    print(msg)
     print("="*50)
 
 # ============================================================
@@ -292,6 +309,8 @@ def send_alert(signal):
 
 def main():
     logger.info("BTC SIGNAL BOT STARTING")
+    logger.info(f"Telegram token present: {bool(TELEGRAM_BOT_TOKEN)}")
+    logger.info(f"Telegram chat ID present: {bool(TELEGRAM_CHAT_ID)}")
 
     fetcher = DataFetcher()
     engine = SignalEngine(fetcher)
